@@ -1,0 +1,24 @@
+{
+  "DryRun": true,
+  "StateDirectory": "migration-state",
+  "Database": {
+    "ConnectionString": "Host=localhost;Port=5432;Database=app;Username=app;Password=CHANGE_ME",
+    "IdType": "bigint",
+    "SelectSql": "SELECT id AS \"Id\", object_key AS \"ObjectKey\" FROM files WHERE is_transfer = false ORDER BY id LIMIT 100",
+    "UpdateSql": "UPDATE files SET is_transfer = true WHERE id = @Id"
+  },
+  "Source": {
+    "Endpoint": "http://localhost:9000",
+    "Region": "us-east-1",
+    "Bucket": "public",
+    "AccessKey": "CHANGE_ME",
+    "SecretKey": "CHANGE_ME"
+  },
+  "Target": {
+    "Endpoint": "http://localhost:9000",
+    "Region": "us-east-1",
+    "Bucket": "private",
+    "AccessKey": "CHANGE_ME",
+    "SecretKey": "CHANGE_ME"
+  }
+}
