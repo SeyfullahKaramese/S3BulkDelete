@@ -43,3 +43,15 @@ Kaynak yetkileri: GetObject, DeleteObject; hedef: GetObject, PutObject. PostgreS
 ## Entegrasyon testleri
 
 Docker, Python 3/venv ve .NET SDK ile `bash tests/run.sh` çalıştırın. 15432 ve 19000 loopback portları boş olmalıdır. Test betiği geçici PostgreSQL ve Moto S3 emülatörü başlatır, dokuz kontrolü çalıştırır ve kendi servislerini kaldırır. Gerçek MinIO uyumluluğu ve üretim erişim yetkileri ayrıca doğrulanmalıdır. Testler kuru çalışma, içerik doğrulama, çakışma koruması, UPDATE hatası, kayıp kaynak, aynı hedef içerik ve silme hatası sonrasında yeniden devam etmeyi kapsar.
+
+## Kod yapısı
+
+- `Program.cs`: uygulamayı başlatır, bağımlılıkları oluşturur ve iptal/çıkış kodlarını yönetir.
+- `Configuration/`: JSON ayarlarını okur ve doğrular.
+- `Models/`: veritabanı kayıtlarını ve işlem günlüğü verilerini tanımlar.
+- `Infrastructure/PostgresFileRepository.cs`: SELECT ve transaction içindeki UPDATE işlemlerini yürütür.
+- `Infrastructure/S3ObjectStorage.cs`: indirme, koşullu yükleme, hash kontrolü ve silme işlemlerini sağlar.
+- `Infrastructure/MigrationJournal.cs`: eşzamanlı çalıştırma kilidini ve yarım kalan işlemleri yönetir.
+- `Services/FileMigrationService.cs`: kopyalama, doğrulama, veritabanı güncelleme ve silme adımlarını sıralar.
+
+Ayar dosyasındaki alan adları ve mevcut işlem günlüklerinin biçimi korunmuştur.
