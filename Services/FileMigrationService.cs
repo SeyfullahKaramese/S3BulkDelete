@@ -17,13 +17,14 @@ public sealed class FileMigrationService(
         var completed = 0;
         var resumed = new HashSet<string>();
 
-        // Updated rows may no longer be selected, so finish journal entries first.
+        // Güncellenmiş kayıtlar SELECT sonucunda görünmeyebilir; önce yarım kalan işlemler tamamlanır.
         await foreach (var pending in journal.ReadPendingAsync(cancellationToken))
         {
             resumed.Add(pending.Entry.Id);
             await ProcessAndReportAsync(pending.Entry, pending.Path);
         }
 
+        // Günlükten işlenen kayıtlar tekrar taşınmaz; kalan belgeler sırayla işlenir.
         var rows = await repository.SelectAsync(cancellationToken);
         foreach (var row in rows.Where(row => !resumed.Contains(row.Id)))
         {
@@ -48,6 +49,7 @@ public sealed class FileMigrationService(
             catch (OperationCanceledException) { throw; }
             catch (Exception exception)
             {
+                // Bir kaydın hatası diğer kayıtları durdurmaz; bekleyen günlük yeniden deneme için kalır.
                 failures++;
                 Console.Error.WriteLine($"Row {entry.Id} failed ({ErrorDescription.Describe(exception)}). Source deletion is gated by verification and committed UPDATE; inspect configuration/server logs and rerun.");
             }
@@ -58,6 +60,7 @@ public sealed class FileMigrationService(
     {
         if (string.IsNullOrWhiteSpace(entry.SourceKey) || string.IsNullOrWhiteSpace(entry.TargetKey))
             throw new InvalidOperationException("Empty object key.");
+        // Kuru çalışmada SQL UPDATE, S3 yükleme ve silme yapılmaz.
         if (settings.DryRun)
         {
             Console.WriteLine($"DRY RUN: row {entry.Id}: copy, verify, update, delete. No remote changes.");
@@ -67,9 +70,11 @@ public sealed class FileMigrationService(
         if (!File.Exists(path))
             entry = await CopyAndJournalAsync(entry, path, cancellationToken);
 
+        // Kaynaktan silmeden önce hedef kopya, günlükten devam edilen işlemlerde de doğrulanır.
         await VerifyTargetAsync(entry, "Journal target verification failed.", cancellationToken);
         if (entry.Phase == MigrationEntry.Copied)
         {
+            // UPDATE commit edildikten sonra aşama kaydedilir. Arada kesinti olursa UPDATE tekrar çalışabilir.
             await repository.MarkTransferredAsync(entry, settings.Target, cancellationToken);
             entry = entry with { Phase = MigrationEntry.Updated };
             await journal.SaveAsync(entry, path, cancellationToken);
@@ -77,6 +82,7 @@ public sealed class FileMigrationService(
         if (entry.Phase != MigrationEntry.Updated)
             throw new InvalidOperationException("Unknown journal phase.");
 
+        // Kaynak yalnızca hedef doğrulaması ve başarılı UPDATE sonrasında silinir.
         await DeleteVerifiedSourceAsync(entry, cancellationToken);
         journal.Complete(path);
     }
@@ -88,12 +94,14 @@ public sealed class FileMigrationService(
         {
             var downloaded = await source.DownloadAsync(entry.SourceKey, temporaryPath, cancellationToken);
             entry = entry with { Sha256 = downloaded.Sha256 };
+            // Hedefte farklı içerik varsa işlem durur; aynı içerik varsa tekrar yüklemek gerekmez.
             var existingHash = await target.GetHashAsync(entry.TargetKey, cancellationToken);
             if (existingHash is not null && existingHash != entry.Sha256)
                 throw new InvalidOperationException("Target exists with different content; refusing overwrite.");
             if (existingHash is null)
                 await target.UploadIfMissingAsync(entry.TargetKey, temporaryPath, downloaded, cancellationToken);
 
+            // Hedef içeriği doğrulanmadan veritabanı güncelleme aşamasına geçilmez.
             await VerifyTargetAsync(entry, "Target SHA256 verification failed.", cancellationToken);
             await journal.SaveAsync(entry, path, cancellationToken);
             return entry;
@@ -112,11 +120,14 @@ public sealed class FileMigrationService(
 
     private async Task DeleteVerifiedSourceAsync(MigrationEntry entry, CancellationToken cancellationToken)
     {
+        // Kopyalamadan sonra kaynak değişmişse yeni içeriğin yanlışlıkla silinmesi engellenir.
+        // Kontrol ile silme arasında değişiklik olabileceğinden diğer yazıcılar durdurulmalıdır.
         var sourceHash = await source.GetHashAsync(entry.SourceKey, cancellationToken);
         if (sourceHash is not null && sourceHash != entry.Sha256)
             throw new InvalidOperationException("Source changed since copy; refusing delete.");
         if (sourceHash is not null)
             await source.DeleteAsync(entry.SourceKey, cancellationToken);
+        // DELETE yanıtı tek başına yeterli sayılmaz; nesnenin artık okunamadığı (404) doğrulanır.
         if (await source.GetHashAsync(entry.SourceKey, cancellationToken) is not null)
             throw new InvalidOperationException("Source still exists after delete.");
     }

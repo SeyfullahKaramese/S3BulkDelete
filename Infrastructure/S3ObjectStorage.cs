@@ -16,6 +16,7 @@ public sealed class S3ObjectStorage : IDisposable
     public S3ObjectStorage(StorageSettings settings)
     {
         this.settings = settings;
+        // MinIO bağlantısında bucket adı istek yolunda kullanılır (path-style erişim).
         client = new AmazonS3Client(new BasicAWSCredentials(settings.AccessKey, settings.SecretKey),
             new AmazonS3Config { ServiceURL = settings.Endpoint, ForcePathStyle = true, AuthenticationRegion = settings.Region });
     }
@@ -24,6 +25,7 @@ public sealed class S3ObjectStorage : IDisposable
     {
         string? contentType;
         var metadata = new Dictionary<string, string>();
+        // Nesne geçici dosyaya indirilirken içerik tipi ve kullanıcı metadata bilgileri korunur.
         using (var response = await client.GetObjectAsync(settings.Bucket, key, cancellationToken))
         {
             contentType = response.Headers.ContentType;
@@ -32,6 +34,7 @@ public sealed class S3ObjectStorage : IDisposable
             await using var file = File.Create(path);
             await response.ResponseStream.CopyToAsync(file, cancellationToken);
         }
+        // Kopyanın hedefteki içerikle karşılaştırılması için SHA-256 özeti hesaplanır.
         await using var downloadedFile = File.OpenRead(path);
         var hash = await ContentHash.FromStreamAsync(downloadedFile, cancellationToken);
         return new DownloadedObject(hash, contentType, metadata);
@@ -46,6 +49,7 @@ public sealed class S3ObjectStorage : IDisposable
             Key = key,
             InputStream = file,
             AutoCloseStream = false,
+            // Aynı anahtarda nesne varsa yükleme reddedilir; mevcut dosyanın üzerine yazılmaz.
             IfNoneMatch = "*",
             ContentType = downloaded.ContentType
         };
@@ -58,15 +62,19 @@ public sealed class S3ObjectStorage : IDisposable
     {
         try
         {
+            // Uzak nesne yeniden okunur; yalnızca ETag veya dosya boyutuna güvenilmez.
             using var response = await client.GetObjectAsync(settings.Bucket, key, cancellationToken);
             return await ContentHash.FromStreamAsync(response.ResponseStream, cancellationToken);
         }
         catch (AmazonS3Exception exception) when (exception.StatusCode == HttpStatusCode.NotFound)
         {
+            // Yalnızca 404, nesnenin bulunmadığı anlamına gelir; yetki ve bağlantı hataları aktarılır.
             return null;
         }
     }
 
+    // Kaynak silindikten sonra yokluk kontrolü FileMigrationService tarafından yapılır.
+    // Versioning açıksa bu istek eski sürümleri temizlemek yerine delete marker oluşturabilir.
     public async Task DeleteAsync(string key, CancellationToken cancellationToken) =>
         await client.DeleteObjectAsync(settings.Bucket, key, cancellationToken);
 

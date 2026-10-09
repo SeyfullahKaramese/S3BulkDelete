@@ -16,7 +16,9 @@ public sealed class MigrationJournal : IDisposable
     {
         DirectoryPath = Path.GetFullPath(settings.StateDirectory, Path.GetDirectoryName(settingsPath)!);
         Directory.CreateDirectory(DirectoryPath);
+        // Aynı günlük dizininde iki taşıma sürecinin eşzamanlı çalışması engellenir.
         runLock = new FileStream(Path.Combine(DirectoryPath, ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        // Günlüklerin farklı kaynak, hedef veya UPDATE ayarlarıyla devam ettirilmesi engellenir.
         scope = ContentHash.FromText($"{settings.Source.Endpoint}|{settings.Source.Bucket}|{settings.Target.Endpoint}|{settings.Target.Bucket}|{settings.Database.ConnectionString}|{settings.Database.UpdateSql}");
     }
 
@@ -29,6 +31,7 @@ public sealed class MigrationJournal : IDisposable
     public async IAsyncEnumerable<(MigrationEntry Entry, string Path)> ReadPendingAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        // IsDeleted=true olan kayıtlar SELECT sonucundan çıkmış olsa da bekleyen işlemler okunur.
         foreach (var path in Directory.EnumerateFiles(DirectoryPath, "*.json"))
         {
             var entry = JsonSerializer.Deserialize<MigrationEntry>(await File.ReadAllTextAsync(path, cancellationToken), json)
@@ -41,11 +44,13 @@ public sealed class MigrationJournal : IDisposable
 
     public async Task SaveAsync(MigrationEntry entry, string path, CancellationToken cancellationToken)
     {
+        // Önce geçici dosya yazılır, ardından günlük dosyası değiştirilir; yarım JSON okunması önlenir.
         var temporaryPath = path + ".tmp";
         await File.WriteAllTextAsync(temporaryPath, JsonSerializer.Serialize(entry, json), cancellationToken);
         File.Move(temporaryPath, path, true);
     }
 
+    // Günlük, kaynak nesnenin yokluğu doğrulandıktan sonra kaldırılır.
     public void Complete(string path) => File.Delete(path);
     public void Dispose() => runLock.Dispose();
 }

@@ -8,7 +8,7 @@ public sealed record MigrationEntry(
     string Sha256,
     string Phase)
 {
-    // Keep the existing string values for compatibility with saved journals.
+    // Daha önce kaydedilmiş günlüklerle uyumluluk için aşama metinleri korunur.
     public const string Copied = "Copied";
     public const string Updated = "Updated";
 }

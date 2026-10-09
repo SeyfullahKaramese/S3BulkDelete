@@ -5,7 +5,7 @@ namespace S3BulkDelete.Infrastructure;
 
 public static class ErrorDescription
 {
-    // Avoid logging connection strings, credential values or server exception details.
+    // Bağlantı dizeleri, parolalar ve sunucu hata ayrıntıları loglara yazılmaz.
     public static string Describe(Exception exception) => exception switch
     {
         InvalidOperationException => exception.Message,

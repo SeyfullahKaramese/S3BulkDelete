@@ -2,8 +2,10 @@ using S3BulkDelete.Configuration;
 using S3BulkDelete.Infrastructure;
 using S3BulkDelete.Services;
 
+// Komut satırında dosya yolu verilmezse settings.json kullanılır.
 var settingsPath = Path.GetFullPath(args.FirstOrDefault() ?? "settings.json");
 using var cancellation = new CancellationTokenSource();
+// Ctrl+C, devam eden işlemlere iptal sinyali gönderir; bekleyen günlükler korunur.
 Console.CancelKeyPress += (_, eventArgs) =>
 {
     eventArgs.Cancel = true;
@@ -12,6 +14,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 
 try
 {
+    // Bağlantıları ve işlem günlüğünü aynı ayarlardan oluşturup taşıma akışını başlatır.
     var settings = await SettingsLoader.LoadAsync(settingsPath, cancellation.Token);
     using var journal = new MigrationJournal(settings, settingsPath);
     using var source = new S3ObjectStorage(settings.Source);

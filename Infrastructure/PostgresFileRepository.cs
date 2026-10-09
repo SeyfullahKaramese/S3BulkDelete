@@ -20,6 +20,7 @@ public sealed class PostgresFileRepository : IAsyncDisposable
     public async Task<List<FileRecord>> SelectAsync(CancellationToken cancellationToken)
     {
         var rows = new List<FileRecord>();
+        // Ayarlardaki SELECT sorgusu taşınacak belge kayıtlarını getirir.
         await using var command = dataSource.CreateCommand(settings.SelectSql);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var idOrdinal = reader.GetOrdinal("Id");
@@ -35,6 +36,7 @@ public sealed class PostgresFileRepository : IAsyncDisposable
             if (reader.IsDBNull(idOrdinal) || reader.IsDBNull(keyOrdinal >= 0 ? keyOrdinal : fileIdOrdinal))
                 throw new InvalidOperationException("Id and ObjectKey/FileId cannot be null.");
             var id = Convert.ToString(reader.GetValue(idOrdinal), CultureInfo.InvariantCulture)!;
+            // ObjectKey yoksa GysDocuments.FileId değeri <FileId>.pdf nesne adına dönüştürülür.
             var sourceKey = keyOrdinal >= 0
                 ? reader.GetString(keyOrdinal)
                 : Convert.ToString(reader.GetValue(fileIdOrdinal), CultureInfo.InvariantCulture) + ".pdf";
@@ -42,6 +44,7 @@ public sealed class PostgresFileRepository : IAsyncDisposable
             rows.Add(new FileRecord(id, sourceKey, targetKey));
         }
 
+        // Aynı nesnenin bu liste içinde birden fazla kez taşınması engellenir.
         ValidateUniqueRows(rows);
         return rows;
     }
@@ -50,17 +53,20 @@ public sealed class PostgresFileRepository : IAsyncDisposable
         MigrationEntry entry, StorageSettings target, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        // UPDATE tam bir kaydı etkilemezse transaction commit edilmez ve geri alınır.
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = settings.UpdateSql;
         command.Transaction = transaction;
 
+        // Guid kimlik uuid parametresiyle gönderilir; değerler SQL metnine eklenmez.
         var (id, idType) = ParseId(entry.Id);
         command.Parameters.AddWithValue("Id", idType, id);
         command.Parameters.AddWithValue("TargetKey", entry.TargetKey);
         command.Parameters.AddWithValue("TargetUrl", BuildTargetUrl(target, entry.TargetKey));
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
             throw new InvalidOperationException("UPDATE must affect exactly one row; transaction rolled back.");
+        // Örnek UPDATE yalnızca IsDeleted alanını true yapar; kaynak silinmeden önce commit beklenir.
         await transaction.CommitAsync(cancellationToken);
     }
 

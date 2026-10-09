@@ -9,6 +9,7 @@ public sealed record AppSettings(
     StorageSettings Source,
     StorageSettings Target)
 {
+    // Eksik ayarlar ve aynı bucket üzerinde taşıma girişimi işlem başlamadan reddedilir.
     public void Validate()
     {
         if (Database is null || Source is null || Target is null
