@@ -7,12 +7,14 @@ public sealed record AppSettings(
     string StateDirectory,
     DatabaseSettings Database,
     StorageSettings Source,
-    StorageSettings Target)
+    StorageSettings? Target)
 {
+    public bool TransferEnabled { get; init; } = true;
+
     // Eksik ayarlar ve aynı bucket üzerinde taşıma girişimi işlem başlamadan reddedilir.
     public void Validate()
     {
-        if (Database is null || Source is null || Target is null
+        if (Database is null || Source is null || (TransferEnabled && Target is null)
             || string.IsNullOrWhiteSpace(StateDirectory)
             || string.IsNullOrWhiteSpace(Database.ConnectionString)
             || string.IsNullOrWhiteSpace(Database.SelectSql)
@@ -22,9 +24,13 @@ public sealed record AppSettings(
         if (Database.IdType is not ("bigint" or "integer" or "uuid" or "text"))
             throw new InvalidOperationException("Unsupported IdType.");
 
+        Database.ValidateConnectionString();
         Source.Validate();
-        Target.Validate();
-        if (Source.Endpoint.TrimEnd('/') == Target.Endpoint.TrimEnd('/') && Source.Bucket == Target.Bucket)
-            throw new InvalidOperationException("Source and target buckets must differ.");
+        if (TransferEnabled)
+        {
+            Target!.Validate();
+            if (Source.Endpoint.TrimEnd('/') == Target.Endpoint.TrimEnd('/') && Source.Bucket == Target.Bucket)
+                throw new InvalidOperationException("Source and target buckets must differ.");
+        }
     }
 }

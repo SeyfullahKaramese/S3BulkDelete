@@ -6,7 +6,7 @@ using S3BulkDelete.Models;
 
 namespace S3BulkDelete.Infrastructure;
 
-public sealed class PostgresFileRepository : IAsyncDisposable
+public sealed class PostgresFileRepository : IFileRepository, IAsyncDisposable
 {
     private readonly DatabaseSettings settings;
     private readonly NpgsqlDataSource dataSource;
@@ -49,8 +49,14 @@ public sealed class PostgresFileRepository : IAsyncDisposable
         return rows;
     }
 
-    public async Task MarkTransferredAsync(
-        MigrationEntry entry, StorageSettings target, CancellationToken cancellationToken)
+    public Task MarkTransferredAsync(MigrationEntry entry, StorageSettings target, CancellationToken cancellationToken) =>
+        UpdateAsync(entry, target, cancellationToken);
+
+    public Task MarkDeletedAsync(MigrationEntry entry, CancellationToken cancellationToken) =>
+        UpdateAsync(entry, null, cancellationToken);
+
+    private async Task UpdateAsync(
+        MigrationEntry entry, StorageSettings? target, CancellationToken cancellationToken)
     {
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         // UPDATE tam bir kaydı etkilemezse transaction commit edilmez ve geri alınır.
@@ -62,11 +68,14 @@ public sealed class PostgresFileRepository : IAsyncDisposable
         // Guid kimlik uuid parametresiyle gönderilir; değerler SQL metnine eklenmez.
         var (id, idType) = ParseId(entry.Id);
         command.Parameters.AddWithValue("Id", idType, id);
-        command.Parameters.AddWithValue("TargetKey", entry.TargetKey);
-        command.Parameters.AddWithValue("TargetUrl", BuildTargetUrl(target, entry.TargetKey));
+        if (target is not null)
+        {
+            command.Parameters.AddWithValue("TargetKey", entry.TargetKey);
+            command.Parameters.AddWithValue("TargetUrl", BuildTargetUrl(target, entry.TargetKey));
+        }
         if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
             throw new InvalidOperationException("UPDATE must affect exactly one row; transaction rolled back.");
-        // Örnek UPDATE yalnızca IsDeleted alanını true yapar; kaynak silinmeden önce commit beklenir.
+        // Örnek UPDATE yalnızca IsDeleted alanını true yapar; modun belirlediği sırada commit edilir.
         await transaction.CommitAsync(cancellationToken);
     }
 

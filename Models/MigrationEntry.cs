@@ -11,4 +11,6 @@ public sealed record MigrationEntry(
     // Daha önce kaydedilmiş günlüklerle uyumluluk için aşama metinleri korunur.
     public const string Copied = "Copied";
     public const string Updated = "Updated";
+    public const string DeletePrepared = "DeletePrepared";
+    public const string SourceDeleted = "SourceDeleted";
 }

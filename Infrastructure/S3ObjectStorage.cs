@@ -8,7 +8,7 @@ namespace S3BulkDelete.Infrastructure;
 
 public sealed record DownloadedObject(string Sha256, string? ContentType, IReadOnlyDictionary<string, string> Metadata);
 
-public sealed class S3ObjectStorage : IDisposable
+public sealed class S3ObjectStorage : IObjectStorage, IDisposable
 {
     private readonly StorageSettings settings;
     private readonly AmazonS3Client client;
@@ -18,7 +18,14 @@ public sealed class S3ObjectStorage : IDisposable
         this.settings = settings;
         // MinIO bağlantısında bucket adı istek yolunda kullanılır (path-style erişim).
         client = new AmazonS3Client(new BasicAWSCredentials(settings.AccessKey, settings.SecretKey),
-            new AmazonS3Config { ServiceURL = settings.Endpoint, ForcePathStyle = true, AuthenticationRegion = settings.Region });
+            new AmazonS3Config
+            {
+                ServiceURL = settings.Endpoint,
+                ForcePathStyle = true,
+                AuthenticationRegion = settings.Region,
+                // Bazı S3 uyumlu sunucular SDK'nın otomatik checksum trailer biçimini desteklemez.
+                RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED
+            });
     }
 
     public async Task<DownloadedObject> DownloadAsync(string key, string path, CancellationToken cancellationToken)
@@ -49,6 +56,9 @@ public sealed class S3ObjectStorage : IDisposable
             Key = key,
             InputStream = file,
             AutoCloseStream = false,
+            // Tam dosya gövdesi imzalanır; aws-chunked/trailer dönüşümü kullanılmaz.
+            UseChunkEncoding = false,
+            DisablePayloadSigning = false,
             // Aynı anahtarda nesne varsa yükleme reddedilir; mevcut dosyanın üzerine yazılmaz.
             IfNoneMatch = "*",
             ContentType = downloaded.ContentType
@@ -66,9 +76,10 @@ public sealed class S3ObjectStorage : IDisposable
             using var response = await client.GetObjectAsync(settings.Bucket, key, cancellationToken);
             return await ContentHash.FromStreamAsync(response.ResponseStream, cancellationToken);
         }
-        catch (AmazonS3Exception exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        catch (AmazonS3Exception exception) when (
+            exception.StatusCode == HttpStatusCode.NotFound && exception.ErrorCode == "NoSuchKey")
         {
-            // Yalnızca 404, nesnenin bulunmadığı anlamına gelir; yetki ve bağlantı hataları aktarılır.
+            // NoSuchBucket ve proxy 404 yanıtları silme doğrulaması olarak kabul edilmez.
             return null;
         }
     }

@@ -18,7 +18,7 @@ try
     var settings = await SettingsLoader.LoadAsync(settingsPath, cancellation.Token);
     using var journal = new MigrationJournal(settings, settingsPath);
     using var source = new S3ObjectStorage(settings.Source);
-    using var target = new S3ObjectStorage(settings.Target);
+    using var target = settings.TransferEnabled ? new S3ObjectStorage(settings.Target!) : null;
     await using var repository = new PostgresFileRepository(settings.Database);
     var migration = new FileMigrationService(settings, repository, source, target, journal);
     Environment.ExitCode = await migration.RunAsync(cancellation.Token);

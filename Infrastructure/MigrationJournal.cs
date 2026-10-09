@@ -9,6 +9,7 @@ public sealed class MigrationJournal : IDisposable
     private readonly FileStream runLock;
     private readonly JsonSerializerOptions json = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private readonly string scope;
+    private readonly bool transferEnabled;
 
     public string DirectoryPath { get; }
 
@@ -19,11 +20,14 @@ public sealed class MigrationJournal : IDisposable
         // Aynı günlük dizininde iki taşıma sürecinin eşzamanlı çalışması engellenir.
         runLock = new FileStream(Path.Combine(DirectoryPath, ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         // Günlüklerin farklı kaynak, hedef veya UPDATE ayarlarıyla devam ettirilmesi engellenir.
-        scope = ContentHash.FromText($"{settings.Source.Endpoint}|{settings.Source.Bucket}|{settings.Target.Endpoint}|{settings.Target.Bucket}|{settings.Database.ConnectionString}|{settings.Database.UpdateSql}");
+        transferEnabled = settings.TransferEnabled;
+        scope = ContentHash.FromText(transferEnabled
+            ? $"{settings.Source.Endpoint}|{settings.Source.Bucket}|{settings.Target!.Endpoint}|{settings.Target.Bucket}|{settings.Database.ConnectionString}|{settings.Database.UpdateSql}"
+            : $"DeleteOnly|{settings.Source.Endpoint}|{settings.Source.Bucket}|{settings.Database.ConnectionString}|{settings.Database.UpdateSql}");
     }
 
     public MigrationEntry CreateEntry(string id, string sourceKey, string targetKey) =>
-        new(scope, id, sourceKey, targetKey, "", MigrationEntry.Copied);
+        new(scope, id, sourceKey, targetKey, "", transferEnabled ? MigrationEntry.Copied : MigrationEntry.DeletePrepared);
 
     public string GetPath(MigrationEntry entry) =>
         Path.Combine(DirectoryPath, ContentHash.FromText(scope + "|" + entry.Id) + ".json");
@@ -50,7 +54,7 @@ public sealed class MigrationJournal : IDisposable
         File.Move(temporaryPath, path, true);
     }
 
-    // Günlük, kaynak nesnenin yokluğu doğrulandıktan sonra kaldırılır.
+    // Günlük, kaynak yokluğu ve veritabanı güncellemesi tamamlandıktan sonra kaldırılır.
     public void Complete(string path) => File.Delete(path);
     public void Dispose() => runLock.Dispose();
 }
