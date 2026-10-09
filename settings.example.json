@@ -3,9 +3,9 @@
   "StateDirectory": "migration-state",
   "Database": {
     "ConnectionString": "Host=localhost;Port=5432;Database=app;Username=app;Password=CHANGE_ME",
-    "IdType": "bigint",
-    "SelectSql": "SELECT id AS \"Id\", object_key AS \"ObjectKey\" FROM files WHERE is_transfer = false ORDER BY id LIMIT 100",
-    "UpdateSql": "UPDATE files SET is_transfer = true WHERE id = @Id"
+    "IdType": "uuid",
+    "SelectSql": "SELECT \"Id\", \"TenantId\", \"FileId\", \"DocumentTypeId\", \"Description\", \"CreationTime\", \"CreatorId\", \"LastModificationTime\", \"LastModifierId\", \"IsDeleted\", \"DeleterId\", \"DeletionTime\" FROM public.\"GysDocuments\" WHERE \"IsDeleted\" = false ORDER BY \"Id\" LIMIT 100",
+    "UpdateSql": "UPDATE public.\"GysDocuments\" SET \"IsDeleted\" = true WHERE \"Id\" = @Id"
   },
   "Source": {
     "Endpoint": "http://localhost:9000",

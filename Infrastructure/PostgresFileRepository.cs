@@ -23,16 +23,21 @@ public sealed class PostgresFileRepository : IAsyncDisposable
         await using var command = dataSource.CreateCommand(settings.SelectSql);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var idOrdinal = reader.GetOrdinal("Id");
-        var keyOrdinal = reader.GetOrdinal("ObjectKey");
+        var keyOrdinal = FindColumn(reader, "ObjectKey");
+        var fileIdOrdinal = keyOrdinal < 0 ? FindColumn(reader, "FileId") : -1;
+        if (keyOrdinal < 0 && fileIdOrdinal < 0)
+            throw new InvalidOperationException("SELECT must return ObjectKey or FileId.");
         var targetOrdinal = Enumerable.Range(0, reader.FieldCount).FirstOrDefault(
             index => reader.GetName(index).Equals("TargetKey", StringComparison.OrdinalIgnoreCase), -1);
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            if (reader.IsDBNull(idOrdinal) || reader.IsDBNull(keyOrdinal))
-                throw new InvalidOperationException("Id and ObjectKey cannot be null.");
+            if (reader.IsDBNull(idOrdinal) || reader.IsDBNull(keyOrdinal >= 0 ? keyOrdinal : fileIdOrdinal))
+                throw new InvalidOperationException("Id and ObjectKey/FileId cannot be null.");
             var id = Convert.ToString(reader.GetValue(idOrdinal), CultureInfo.InvariantCulture)!;
-            var sourceKey = reader.GetString(keyOrdinal);
+            var sourceKey = keyOrdinal >= 0
+                ? reader.GetString(keyOrdinal)
+                : Convert.ToString(reader.GetValue(fileIdOrdinal), CultureInfo.InvariantCulture) + ".pdf";
             var targetKey = targetOrdinal < 0 ? sourceKey : reader.GetString(targetOrdinal);
             rows.Add(new FileRecord(id, sourceKey, targetKey));
         }
@@ -58,6 +63,10 @@ public sealed class PostgresFileRepository : IAsyncDisposable
             throw new InvalidOperationException("UPDATE must affect exactly one row; transaction rolled back.");
         await transaction.CommitAsync(cancellationToken);
     }
+
+    private static int FindColumn(NpgsqlDataReader reader, string name) =>
+        Enumerable.Range(0, reader.FieldCount).FirstOrDefault(
+            index => reader.GetName(index).Equals(name, StringComparison.OrdinalIgnoreCase), -1);
 
     private (object Value, NpgsqlDbType Type) ParseId(string id) => settings.IdType switch
     {

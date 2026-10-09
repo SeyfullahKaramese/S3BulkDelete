@@ -1,6 +1,6 @@
 # S3BulkDelete
 
-.NET 10 konsol uygulaması. PostgreSQL'den seçilen dosyaları public S3/MinIO bucket'ından private bucket'a taşır ve ilgili kaydın `is_transfer` alanını işaretler.
+.NET 10 konsol uygulaması. PostgreSQL'den seçilen dosyaları public S3/MinIO bucket'ından private bucket'a taşır ve `public."GysDocuments"` tablosundaki ilgili kaydın `IsDeleted` alanını `true` yapar. Dosya anahtarı `FileId.pdf` olarak oluşturulur.
 
 ## Kurulum ve çalıştırma
 
@@ -16,16 +16,22 @@ dotnet run --no-build -- settings.json
 
 ## SQL sözleşmesi
 
-SELECT, null olmayan ve benzersiz `Id` ile `ObjectKey` kolonlarını döndürmelidir. İsteğe bağlı `TargetKey` farklı hedef anahtarı sağlar; yoksa anahtar korunur. Anahtar tam URL değil, bucket içindeki dosya yoludur. Örnek sorgu her çalıştırmada en fazla 100 kayıt işler. Aynı dosyaya birden fazla veritabanı kaydı referans veriyorsa sorguları ve veri modelini uyarlamadan kullanmayın.
+SELECT, null olmayan ve benzersiz `Id` ile `FileId` kolonlarını döndürebilir; bu durumda kaynak ve hedef dosya adı `<FileId>.pdf` olur. Genel kullanım için `ObjectKey` kolonu da desteklenir; birlikte döndürülürse `ObjectKey` önceliklidir. İsteğe bağlı `TargetKey` farklı hedef anahtarı sağlar; yoksa anahtar korunur. Anahtar tam URL değil, bucket içindeki dosya yoludur. Örnek sorgu her çalıştırmada en fazla 100 kayıt işler. Aynı dosyaya birden fazla veritabanı kaydı referans veriyorsa sorguları ve veri modelini uyarlamadan kullanmayın.
 
 ```sql
-SELECT id AS "Id", object_key AS "ObjectKey"
-FROM files WHERE is_transfer = false ORDER BY id LIMIT 100;
+SELECT "Id", "TenantId", "FileId", "DocumentTypeId", "Description",
+       "CreationTime", "CreatorId", "LastModificationTime", "LastModifierId",
+       "IsDeleted", "DeleterId", "DeletionTime"
+FROM public."GysDocuments"
+WHERE "IsDeleted" = false
+ORDER BY "Id" LIMIT 100;
 
-UPDATE files SET is_transfer = true WHERE id = @Id;
+UPDATE public."GysDocuments" SET "IsDeleted" = true WHERE "Id" = @Id;
 ```
 
-`IdType`: `bigint`, `integer`, `uuid` veya `text`. UPDATE parametreleri: `@Id`, `@TargetKey`, `@TargetUrl`. UPDATE tam bir kaydı etkilemeli ve tekrar çalıştırılabilir olmalıdır. Örneğin `WHERE is_transfer = false` koşulunu UPDATE'e eklemeyin: commit sonrasında süreç kesilirse UPDATE yeniden çalışabilir. TargetUrl yalnızca kalıcı nesne adresidir; private dosyaya erişim için imzalı URL gerekir.
+`GysDocuments.Id` Guid olduğundan `IdType: uuid` kullanılır. Genel kullanımda `bigint`, `integer` ve `text` tipleri de desteklenir. UPDATE parametreleri: `@Id`, `@TargetKey`, `@TargetUrl`. UPDATE tam bir kaydı etkilemeli ve tekrar çalıştırılabilir olmalıdır. Örneğin `WHERE "IsDeleted" = false` koşulunu UPDATE'e eklemeyin: commit sonrasında süreç kesilirse UPDATE yeniden çalışabilir. TargetUrl yalnızca kalıcı nesne adresidir; private dosyaya erişim için imzalı URL gerekir.
+
+Mevcut `settings.json` dosyanızdaki SELECT/UPDATE sorgularını ve `IdType` ayarını da güncelleyin; örnek dosyayı değiştirmek kişisel ayarları değiştirmez. Yalnızca `IsDeleted` güncellenir; diğer kolonlar korunur. SELECT içindeki `IsDeleted = false` koşulu zaten işaretlenmiş kayıtların yeniden seçilmesini önler.
 
 ## İşlem sırası ve hata kurtarma
 
@@ -42,7 +48,7 @@ Kaynak yetkileri: GetObject, DeleteObject; hedef: GetObject, PutObject. PostgreS
 
 ## Entegrasyon testleri
 
-Docker, Python 3/venv ve .NET SDK ile `bash tests/run.sh` çalıştırın. 15432 ve 19000 loopback portları boş olmalıdır. Test betiği geçici PostgreSQL ve Moto S3 emülatörü başlatır, dokuz kontrolü çalıştırır ve kendi servislerini kaldırır. Gerçek MinIO uyumluluğu ve üretim erişim yetkileri ayrıca doğrulanmalıdır. Testler kuru çalışma, içerik doğrulama, çakışma koruması, UPDATE hatası, kayıp kaynak, aynı hedef içerik ve silme hatası sonrasında yeniden devam etmeyi kapsar.
+Docker, Python 3/venv ve .NET SDK ile `bash tests/run.sh` çalıştırın. 15432 ve 19000 loopback portları boş olmalıdır. Test betiği geçici PostgreSQL ve Moto S3 emülatörü başlatır, on kontrolü çalıştırır ve kendi servislerini kaldırır. Gerçek MinIO uyumluluğu ve üretim erişim yetkileri ayrıca doğrulanmalıdır. Testler kuru çalışma, içerik doğrulama, çakışma koruması, UPDATE hatası, kayıp kaynak, aynı hedef içerik ve silme hatası sonrasında yeniden devam etmeyi kapsar.
 
 ## Kod yapısı
 
